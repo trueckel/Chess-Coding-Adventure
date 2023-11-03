@@ -7,8 +7,9 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 public class MyBot : IChessBot
 {
-    readonly System.Random rng = new();
+    bool debug;
     private int searchDepth;
+    private Move bestMove;
     int cEvals;
     private int[] pieceVals = { 100, 290, 310, 500, 900, 0, -100, -290, -310, -500, -900, 0 };
     Dictionary<string, int> openingMovesBoni = new Dictionary<string, int>
@@ -32,37 +33,55 @@ public class MyBot : IChessBot
         { "Ke1c1", 50 },
     };
 
-    public Move Think(Board board, Timer timer)
+public Move Think(Board board, Timer timer)
     {
         cEvals = 0;
+        debug = false;
 
         Move[] moves = board.GetLegalMoves();
-        Console.WriteLine("Legal moves: {0}", moves.Length);
+        Console.WriteLine("####################### Legal moves: {0}", moves.Length);
 
-        //int searchDepth;
-        switch (moves.Length)
+        /*Console.WriteLine("New Move list ---");
+        foreach (Move move in moves)
         {
-            case > 40:
-                searchDepth = 3;
+            Console.WriteLine("Move {0} {1}:{2}", board.GetPiece(move.StartSquare), move.StartSquare.Name, move.TargetSquare.Name);
+        }*/
+        /*Console.WriteLine("After ordering ---");
+        foreach (Move move in moves)
+        {
+            Console.WriteLine("Move {0} {1}:{2}", board.GetPiece(move.StartSquare), move.StartSquare.Name, move.TargetSquare.Name);
+        }*/
+
+        System.Random rng = new();
+
+        int numPieces = 0;
+        foreach (PieceList list in board.GetAllPieceLists())
+        {
+            numPieces += list.Count();
+        }
+
+        switch (numPieces)
+        {
+            case < 4:
+                searchDepth = 7;
                 break;
-            case > 30:
-                searchDepth = 4;
+            case < 7:
+                searchDepth = 6;
                 break;
-            default:
+            case < 10:
                 searchDepth = 5;
                 break;
+            default:
+                searchDepth = 4;
+                break;
         }
-        searchDepth = 3;
 
-        Move bestMove = moves[0];
-        /*Console.WriteLine("Start MinMax Search with depth {0}", searchDepth);
-        Search(board, searchDepth, int.MinValue, int.MaxValue);
-        Console.WriteLine("ms: {0} for {1} evals, best move: {2}", timer.MillisecondsElapsedThisTurn, cEvals, getMoveAsString(bestMove));
-        cEvals = 0;*/
-        int time_stop = timer.MillisecondsElapsedThisTurn;
-        Console.WriteLine("Start NegaMax Search with depth {0}", searchDepth);
-        bestMove = getBestMove(board, searchDepth);
-        Console.WriteLine("ms: {0} for {1} evals, best move: {2}", timer.MillisecondsElapsedThisTurn - time_stop, cEvals, getMoveAsString(bestMove));
+        //searchDepth = 2;
+        bestMove = moves[0];
+        Console.WriteLine("Start Search with depth {0}", searchDepth);
+        //Search(board, searchDepth, -10000, 10000, board.IsWhiteToMove);
+        NegaMax(board, searchDepth, -10000, 10000);
+        Console.WriteLine("ms: {0} for {1} evals", timer.MillisecondsElapsedThisTurn, cEvals);
         return bestMove;
     }
 
@@ -74,64 +93,41 @@ public class MyBot : IChessBot
         {
             Piece movePieceType = board.GetPiece(move.StartSquare);
             Piece capturePieceType = board.GetPiece(move.TargetSquare);
-            
+
             if (capturePieceType.PieceType != PieceType.None)
             {
                 moveValList[index] += getPieceVal(capturePieceType) - getPieceVal(movePieceType);
             }
 
-            board.MakeMove(move);
+            /*board.MakeMove(move);
             if (board.IsInCheck())
             {
                 moveValList[index] += 10;
             }
-            board.UndoMove(move);
+            board.UndoMove(move);*/
 
             index++;
         }
         Array.Sort(moveValList, moves);
-        if (board.IsWhiteToMove)
-        {
-            Array.Reverse(moves);
-        }
-    }
-
-    public Move getBestMove(Board board, int searchDepth)
-    {
-        Move[] legal_moves = board.GetLegalMoves();
-        orderMoves(board, legal_moves);
-
-        Move bestMove = legal_moves[0];
-        int maxScore = -10000;
-        int alpha = -10000;
-        int beta = 10000;
-        foreach (Move move in legal_moves)
-        {
-            board.MakeMove(move);
-            Console.WriteLine("==== Try move {0}", getMoveAsString(move));
-            int score = -NegaMax(board, searchDepth-1, alpha, beta);
-            Console.WriteLine("=========> Move Score {0}", score);
-            if (score > maxScore)
-            {
-                beta = score;
-                bestMove = move;
-                maxScore = score;
-            }
-            board.UndoMove(move);
-        }
-        return bestMove;
+        Array.Reverse(moves);
     }
 
     public int NegaMax(Board board, int depth, int alpha, int beta)
     {
-        
-        //string indent = board.IsWhiteToMove ? "w" : "b";
-        //indent += new string('-', searchDepth-depth+1);
+        string indent = "";
+        if (debug)
+        {
+            indent = board.IsWhiteToMove ? "w" : "b";
+            indent += new string('-', searchDepth - depth + 1);
+        }
         if (depth == 0)
         {
             cEvals++;
-            int evaluation = Evaluate(board);
-            //Console.WriteLine(indent + " Evaluation: {0}", evaluation);
+            int evaluation = Evaluate_NegaMax(board);
+            if (debug)
+            {
+                Console.WriteLine(indent + " Evaluation: {0}", evaluation);
+            }
             return evaluation;
         }
 
@@ -140,123 +136,43 @@ public class MyBot : IChessBot
 
         if (legal_moves.Length == 0)
         {
-            
             if (board.IsInCheck())
             {
-                //Console.WriteLine(indent + " Return -inf (checkmate)");
-                return int.MinValue;
+                return -1000000;
             }
-            //Console.WriteLine("Return 0 (stalemate)");
             return 0;
         }
 
+        int maxEval = alpha;
         foreach (Move move in legal_moves)
         {
             board.MakeMove(move);
-            //Console.WriteLine(indent + "move {0}", getMoveAsString(move));
+            if (debug)
+            {
+                Console.WriteLine(indent + "move {0}", getMoveAsString(move));
+            }
+            int eval = -NegaMax(board, depth - 1, -beta, -maxEval);
 
-            int eval = -NegaMax(board, depth - 1, -beta, -alpha);
+            if (depth == searchDepth)
+            {
+                Console.WriteLine(indent + "move {0}: {1}", getMoveAsString(move), eval);
+            }
 
-            //Console.WriteLine(indent + " Current eval: {0}, alpha: {1}, beta: {2}", eval, alpha, beta);
-
-            alpha = Math.Max(alpha, eval);
             board.UndoMove(move);
-            if (alpha >= beta)
+            if (eval > maxEval)
             {
-                //Console.WriteLine(indent + " Pruning: alpha: {0}, beta: {1}", alpha, beta);
-                return beta;
-                break;
-            }
-        }
-        //Console.WriteLine(indent + " return alpha: {0}", alpha);
-        return alpha;
-    }
-
-    public int Search(Board board, int depth, int alpha, int beta)
-    {
-        if (depth == 0)
-        {
-            cEvals++;
-            return Evaluate(board);
-        }
-
-        Move[] legal_moves = board.GetLegalMoves();
-        orderMoves(board, legal_moves);
-
-        if (legal_moves.Length == 0)
-        {
-            if (board.IsInCheck())
-            {
-                return board.IsWhiteToMove ? int.MinValue : int.MaxValue;
-            }
-            return 0;
-        }
-
-        if (board.IsWhiteToMove)
-        {
-            int maxEval = alpha;
-            foreach (Move move in legal_moves)
-            {
-                board.MakeMove(move);
-                int eval = Search(board, depth - 1, alpha, beta); 
+                maxEval = eval;
                 if (depth == searchDepth)
                 {
-                    /*if (board.PlyCount < 20)
-                    {
-                        if (openingMovesBoni.ContainsKey(getMoveAsString(move)))
-                        {
-                            eval += openingMovesBoni[getMoveAsString(move)];
-                        }
-                        eval += rng.Next(-20, 20);
-                    }*/
-                    printMoveEvals(move, eval);
+                    bestMove = move;
                 }
-                board.UndoMove(move);
-                if (eval > maxEval)
-                {
-                    maxEval = eval;
-                }
-                alpha = Math.Max(alpha, eval);
-                if (beta <= alpha)
-                {
+                if (maxEval >= beta) {
+                    Console.WriteLine(indent + " beta cutoff, maxEval ({0}) >= beta ({1})", maxEval, beta);
                     break;
                 }
             }
-            return maxEval;
         }
-        else
-        {
-            int minEval = beta;
-            foreach (Move move in legal_moves)
-            {
-                board.MakeMove(move);
-                int eval = Search(board, depth - 1, alpha, beta);
-                if (depth == searchDepth)
-                {
-                    /*string replMoveName = replaceMoveName(getMoveAsString(move));
-                    if (board.PlyCount < 20)
-                    {
-                        if (openingMovesBoni.ContainsKey(replMoveName))
-                        {
-                            eval -= openingMovesBoni[replMoveName];
-                        }
-                        eval -= rng.Next(-20, 20);
-                    }*/
-                    printMoveEvals(move, eval);
-                }
-                board.UndoMove(move);
-                if (eval < minEval)
-                {
-                    minEval = eval;
-                }
-                beta = Math.Min(beta, eval);
-                if (beta <= alpha)
-                {
-                    break;
-                }
-            }
-            return minEval;
-        }
+        return maxEval;
     }
 
     public string getMoveAsString(Move move)
@@ -282,19 +198,57 @@ public class MyBot : IChessBot
     {
         PieceList[] piecesLists = board.GetAllPieceLists();
         int material = 0;
-        for (int i = 0; i < piecesLists.Length; i++)
+        int sum_white = 0, sum_black = 0;
+        for (int i = 0; i < piecesLists.Length / 2; i++)
         {
-            material += piecesLists[i].Count() * pieceVals[i];
+            sum_white += piecesLists[i].Count * pieceVals[i];
+            sum_black -= piecesLists[i+6].Count * pieceVals[i+6];
+            //material += piecesLists[i].Count * pieceVals[i];
         }
+        material = sum_white - sum_black;
+        if (sum_white > sum_black)
+        {
+            material += endgame_advantage(board);
+        }
+        else if (sum_white < sum_black)
+        {
+            material -= endgame_advantage(board);
+        }
+        //material += board.IsWhiteToMove ? endgame_advantage(board) : -endgame_advantage(board);
+        return material;
+    }
 
-        int eval = board.IsWhiteToMove ? material : material * -1;
-        //Console.WriteLine("Return evaluation; {0}", eval);
-        return eval;
+    public int Evaluate_NegaMax(Board board)
+    {
+        PieceList[] piecesLists = board.GetAllPieceLists();
+        int material = 0;
+        int sum_white = 0, sum_black = 0;
+        for (int i = 0; i < piecesLists.Length / 2; i++)
+        {
+            sum_white += piecesLists[i].Count * pieceVals[i];
+            sum_black -= piecesLists[i + 6].Count * pieceVals[i + 6];
+            //material += piecesLists[i].Count * pieceVals[i];
+        }
+        material = sum_white - sum_black;
+        if (sum_white > sum_black)
+        {
+            material += endgame_advantage(board);
+        }
+        else if (sum_white < sum_black)
+        {
+            material -= endgame_advantage(board);
+        }
+        //material += board.IsWhiteToMove ? endgame_advantage(board) : -endgame_advantage(board);
+        if (!board.IsWhiteToMove)
+        {
+            material = material * -1;
+        }
+        return material;
     }
 
     public int getPieceVal(Piece piece)
     {
-        return pieceVals[((int)piece.PieceType)-1];
+        return pieceVals[((int)piece.PieceType) - 1];
     }
 
     public void printMoveEvals(Move move, int eval)
@@ -305,5 +259,12 @@ public class MyBot : IChessBot
     public string replaceMoveName(string moveName)
     {
         return moveName.Replace("8", "1").Replace("7", "2").Replace("6", "3").Replace("5", "4");
+    }
+
+    public int endgame_advantage(Board board)
+    {
+        int manhattanDist = Math.Abs(board.GetKingSquare(true).Rank - board.GetKingSquare(false).Rank);
+        manhattanDist += Math.Abs(board.GetKingSquare(true).File - board.GetKingSquare(false).File);
+        return (14 - manhattanDist);
     }
 }
