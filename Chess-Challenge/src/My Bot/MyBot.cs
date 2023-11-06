@@ -22,6 +22,14 @@ public class MyBot : IChessBot
         cEvals = 0;
         debug = false;
 
+        /*double paraboloid(double x, double y) => (-Math.Pow(x - 3.5, 2)/30 - Math.Pow(y - 3.5, 2)/30 + 0.3)*100;
+        int testval = (int)paraboloid(0, 0);
+        int testval2 = (int)paraboloid(3, 4);
+        int testval3 = (int)paraboloid(0, 4);
+        Console.WriteLine("Paraboloid: {0}", testval);
+        Console.WriteLine("Paraboloid: {0}", testval2);
+        Console.WriteLine("Paraboloid: {0}", testval3);*/
+
         Move[] moves = board.GetLegalMoves();
         Console.WriteLine("####################### Legal moves: {0}", moves.Length);
 
@@ -41,7 +49,7 @@ public class MyBot : IChessBot
         switch (getNumPiecesLeft(board))
         {
             case < 4:
-                searchDepth = 7;
+                searchDepth = 6;
                 break;
             case < 7:
                 searchDepth = 6;
@@ -108,8 +116,8 @@ public class MyBot : IChessBot
         if (depth == 0)
         {
             cEvals++;
-            //int evaluation = Evaluate_NegaMax(board);
-            int evaluation = NegaMaxCapturesOnly(board, alpha, beta);
+            int evaluation = Evaluate_NegaMax(board);
+            //int evaluation = NegaMaxCapturesOnly(board, alpha, beta);
             if (debug)
             {
                 Console.WriteLine(indent + " Evaluation: {0}", evaluation);
@@ -265,35 +273,67 @@ public class MyBot : IChessBot
     public int Evaluate_NegaMax(Board board)
     {
         PieceList[] piecesLists = board.GetAllPieceLists();
-        int eval;
-        int sum_white = 0, sum_black = 0;
+        int eval = 0;
+        int material_maxplayer = 0, material_minplayer = 0;
         for (int i = 0; i < piecesLists.Length / 2; i++)
         {
-            sum_white += piecesLists[i].Count * pieceVals[i];
-            sum_black += piecesLists[i + 6].Count * pieceVals[i];
+            material_maxplayer += piecesLists[i].Count * pieceVals[i];
+            material_minplayer += piecesLists[i + 6].Count * pieceVals[i];
             //material += piecesLists[i].Count * pieceVals[i];
         }
-        eval = sum_white - sum_black;
-        //eval += EvaluateKingsideSafety2(board);
-        /*if (sum_white - sum_black > 3)
-        {
-            eval += KingToEdgeEvalutation(board);
-        }
-        else if (sum_black - sum_white > 3)
-        {
-            eval -= KingToEdgeEvalutation(board);
-        }*/
-        //material += board.IsWhiteToMove ? endgame_advantage(board) : -endgame_advantage(board);
+
+        eval += KnightPositionEval(board);
+        //Console.WriteLine("after knightEval: {0}", eval);
+
+        // Black-White differenciation until here
+
         if (!board.IsWhiteToMove)
         {
             eval = eval * -1;
         }
+
+        // Max-Min Player differenciation beginning here
+
+        if (!board.IsWhiteToMove)
+        {
+            int temp = material_maxplayer;
+            material_maxplayer = material_minplayer;
+            material_minplayer = temp;
+        }
+        eval += material_maxplayer - material_minplayer;
+
+        //Console.WriteLine("after materialEval: {0}", eval);
+
+        //eval += EvaluateKingsideSafety2(board);
+        //material += board.IsWhiteToMove ? endgame_advantage(board) : -endgame_advantage(board);
+
         int numPiecesLeft = getNumPiecesLeft(board);
         if (numPiecesLeft < 20)
         {
             //eval += (int)((20.0 - numPiecesLeft) / 20.0) * KingControlEvaluation(board);
             //eval += (int)((20.0 - numPiecesLeft) / 20.0) * KingToEdgeEvalutation(board);
         }
+        /*Console.WriteLine("material_minplayer: {0}", material_minplayer);
+        Console.WriteLine("material_maxplayer: {0}", material_maxplayer);
+        int evalK = 0;
+        if (material_maxplayer < 900 && (material_maxplayer < material_minplayer))
+        {
+            evalK = KingToEdgeEvalutation(board);
+            Console.WriteLine("KingEval: {0}", evalK);
+            //eval += KingToEdgeEvalutation(board);
+            eval -= evalK;
+        }
+        Console.WriteLine("after kingEval: {0}", eval);*/
+        if (material_maxplayer > material_minplayer && material_minplayer < 900)
+        {
+            eval += KingToEdgeEvalutation(board);
+        } else if (material_minplayer > material_maxplayer && material_maxplayer < 900)
+        {
+            eval -= KingToEdgeEvalutation(board);
+        }
+        //Console.WriteLine("after kingEval: {0}", eval);
+
+
         return eval;
     }
 
@@ -309,14 +349,15 @@ public class MyBot : IChessBot
 
     public int KingToEdgeEvalutation(Board board)
     {
-        Square ks = board.GetKingSquare(!board.IsWhiteToMove);
-        int[] edge_bonus = { 50, 30, 10, 0, 0, 10, 30, 50 };
-        int bonus = edge_bonus[ks.Rank] + edge_bonus[ks.File];
-        //int manhattanDist = Math.Abs(board.GetKingSquare(true).Rank - board.GetKingSquare(false).Rank);
-        //manhattanDist += Math.Abs(board.GetKingSquare(true).File - board.GetKingSquare(false).File);
+        /*Square ks = board.GetKingSquare(!board.IsWhiteToMove);
+        int[] edge_bonus = { 10, 5, 2, 0, 0, 2, 5, 10 };
+        int bonus = edge_bonus[ks.Rank] + edge_bonus[ks.File];*/
+        int manhattanDist = Math.Abs(board.GetKingSquare(true).Rank - board.GetKingSquare(false).Rank);
+        manhattanDist += Math.Abs(board.GetKingSquare(true).File - board.GetKingSquare(false).File);
         //return (14 - manhattanDist);
-        Console.WriteLine("KingToEdgeEvalutation Bonus {0}", bonus);
-        return bonus;
+        int eval = (14 - manhattanDist) * 2;
+        //Console.WriteLine("KingToEdgeEvalutation {0}", eval);
+        return (14 - manhattanDist)*2;
     }
 
     public int KingControlEvaluation(Board board)
@@ -369,5 +410,21 @@ public class MyBot : IChessBot
             }
         }
         return eval;
+    }
+
+    public int KnightPositionEval(Board board)
+    {
+        double eval = 0;
+        double paraboloid(double x, double y) => -Math.Pow(x-3.5, 2)/30 - Math.Pow(y-3.5, 2)/30 + 0.3;
+        foreach (Piece knight in board.GetPieceList(PieceType.Knight, true))
+        {
+            eval += paraboloid(knight.Square.File, knight.Square.Rank);
+        }
+        foreach (Piece knight in board.GetPieceList(PieceType.Knight, false))
+        {
+            eval -= paraboloid(knight.Square.File, knight.Square.Rank);
+        }
+        //Console.WriteLine("knightEval: {0}", eval);
+        return Convert.ToInt32(eval*100);
     }
 }
