@@ -5,6 +5,7 @@ using System.Linq;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using ChessChallenge.API;
+//using ChessChallenge.Chess;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 public class MyBot : IChessBot
@@ -14,29 +15,9 @@ public class MyBot : IChessBot
     private int searchDepth;
     private Move bestMove;
     int cEvals;
-    private int[] pieceVals = { 100, 290, 310, 500, 900, 0, -100, -290, -310, -500, -900, 0 };
-    Dictionary<string, int> openingMovesBoni = new Dictionary<string, int>
-    {
-        { "e4", 30 },
-        { "d4", 30 },
-        { "c4", 25 },
-        { "b3", 20 },
-        { "g3", 20 },
-        { "Nb1c3", 30 },
-        { "Nb1d2", 25 },
-        { "Ng1f3", 30 },
-        { "Ng1e2", 25 },
-        { "Bc1f4", 30 },
-        { "Bc1g5", 25 },
-        { "Bf1c4", 30 },
-        { "Bf1b5", 25 },
-        { "Bf1g2", 35 },
-        { "Bc1b2", 35 },
-        { "Ke1g1", 50 },
-        { "Ke1c1", 50 },
-    };
+    private int[] pieceVals = { 100, 290, 310, 500, 900, 0 };
 
-public Move Think(Board board, Timer timer)
+    public Move Think(Board board, Timer timer)
     {
         cEvals = 0;
         debug = false;
@@ -73,12 +54,19 @@ public Move Think(Board board, Timer timer)
                 break;
         }
 
-        //searchDepth = 2;
+        //searchDepth = 1;
         bestMove = moves[0];
         Console.WriteLine("Start Search with depth {0}", searchDepth);
         //Search(board, searchDepth, -10000, 10000, board.IsWhiteToMove);
         NegaMax(board, searchDepth, -10000, 10000);
         Console.WriteLine("ms: {0} for {1} evals", timer.MillisecondsElapsedThisTurn, cEvals);
+        /*BitboardHelper.VisualizeBitboard(board.GetPieceBitboard(PieceType.Pawn, !board.IsWhiteToMove));
+        ulong pawns = board.GetPieceBitboard(PieceType.Pawn, board.IsWhiteToMove);
+        ulong res = pawns & (1 << 53);
+        bool res_bool = res == (1 << 53);
+        Console.WriteLine(Convert.ToString((long)pawns, 2));
+        Console.WriteLine(res_bool);
+        Console.WriteLine(Convert.ToString((long)res, 2));*/
         return bestMove;
     }
 
@@ -150,15 +138,16 @@ public Move Think(Board board, Timer timer)
                 Console.WriteLine(indent + "move {0}", getMoveAsString(move));
             }
             int eval = -NegaMax(board, depth - 1, -beta, -maxEval);
-            if (depth == searchDepth)
-            {
-                //eval += OpeningMoveBonus(board, getMoveAsString(move));
-            }
-            
 
             if (depth == searchDepth)
             {
                 Console.WriteLine(indent + "move {0}: {1}", getMoveAsString(move), eval);
+            }
+
+            if (board.GameRepetitionHistory.Contains(board.ZobristKey))
+            {
+                board.UndoMove(move);
+                continue;
             }
 
             board.UndoMove(move);
@@ -167,6 +156,7 @@ public Move Think(Board board, Timer timer)
                 maxEval = eval;
                 if (depth == searchDepth)
                 {
+
                     bestMove = move;
                 }
                 if (maxEval >= beta)
@@ -187,7 +177,7 @@ public Move Think(Board board, Timer timer)
             indent = board.IsWhiteToMove ? "w" : "b";
             indent += " capturesOnly";
         }
-        
+
         cEvals++;
         int evaluation = Evaluate_NegaMax(board);
         if (evaluation >= beta)
@@ -195,10 +185,6 @@ public Move Think(Board board, Timer timer)
             return beta;
         }
         alpha = Math.Max(alpha, evaluation);
-        if (debug)
-        {
-            Console.WriteLine(indent + " Evaluation: {0}", evaluation);
-        }
 
         Move[] legal_moves = board.GetLegalMoves(true);
         orderMoves(board, legal_moves);
@@ -284,10 +270,11 @@ public Move Think(Board board, Timer timer)
         for (int i = 0; i < piecesLists.Length / 2; i++)
         {
             sum_white += piecesLists[i].Count * pieceVals[i];
-            sum_black -= piecesLists[i + 6].Count * pieceVals[i + 6];
+            sum_black += piecesLists[i + 6].Count * pieceVals[i];
             //material += piecesLists[i].Count * pieceVals[i];
         }
         eval = sum_white - sum_black;
+        //eval += EvaluateKingsideSafety2(board);
         /*if (sum_white - sum_black > 3)
         {
             eval += KingToEdgeEvalutation(board);
@@ -318,11 +305,6 @@ public Move Think(Board board, Timer timer)
     public void printMoveEvals(Move move, int eval)
     {
         Console.WriteLine("Move: {0}, Eval: {1}", getMoveAsString(move), eval);
-    }
-
-    public string replaceMoveName(string moveName)
-    {
-        return moveName.Replace("8", "1").Replace("7", "2").Replace("6", "3").Replace("5", "4");
     }
 
     public int KingToEdgeEvalutation(Board board)
@@ -359,23 +341,6 @@ public Move Think(Board board, Timer timer)
         return attackedSquaresAroundKing * 3;
     }
 
-    public int OpeningMoveBonus(Board board, string move_as_string)
-    {
-        int bonus = 0;
-        if (board.PlyCount < 20)
-        {
-            if (openingMovesBoni.ContainsKey(move_as_string))
-            {
-                bonus += openingMovesBoni[move_as_string];
-                bonus += rng.Next(-20, 20);
-            }
-            
-        }
-        //printMoveEvals(move, eval);
-        Console.WriteLine("OpeningMove {0} Bonus {1}", move_as_string, bonus);
-        return bonus;
-    }
-
     public int getNumPiecesLeft(Board board)
     {
         int numPieces = 0;
@@ -384,5 +349,25 @@ public Move Think(Board board, Timer timer)
             numPieces += list.Count();
         }
         return numPieces;
+    }
+
+    public int EvaluateKingsideSafety2(Board board)
+    {
+        int eval = 0;
+        for (int i = 13; i < 16; i++)
+        {
+            if (board.GetPiece(new Square(i)).PieceType != PieceType.Pawn)
+            {
+                eval -= 20;
+            }
+        }
+        for (int i = 53; i < 56; i++)
+        {
+            if (board.GetPiece(new Square(i)).PieceType != PieceType.Pawn)
+            {
+                eval += 20;
+            }
+        }
+        return eval;
     }
 }
