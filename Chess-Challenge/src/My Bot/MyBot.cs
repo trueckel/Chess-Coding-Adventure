@@ -4,100 +4,99 @@ using System.ComponentModel;
 using System.Linq;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics.X86;
 using ChessChallenge.API;
-//using ChessChallenge.Chess;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 public class MyBot : IChessBot
 {
-    Random rng = new Random();
     bool debug;
-    private int searchDepth;
-    private Move bestMove;
+    private int currentSearchDepth;
+    private Move[] bestMove;
     int cEvals;
+    int cDictHits;
     private int[] pieceVals = { 100, 290, 310, 500, 900, 0 };
+    private Timer gameTimer;
+    private Dictionary<ulong, int> knownPositions;
+    private double paraboloid_center_bonus(double x, double y) => (-Math.Pow(x - 3.5, 2) / 30 - Math.Pow(y - 3.5, 2) / 30 + 0.3) * 100;
 
     public Move Think(Board board, Timer timer)
     {
-        cEvals = 0;
+        gameTimer = timer;
         debug = false;
 
-        /*double paraboloid(double x, double y) => (-Math.Pow(x - 3.5, 2)/30 - Math.Pow(y - 3.5, 2)/30 + 0.3)*100;
-        int testval = (int)paraboloid(0, 0);
-        int testval2 = (int)paraboloid(3, 4);
-        int testval3 = (int)paraboloid(0, 4);
-        Console.WriteLine("Paraboloid: {0}", testval);
-        Console.WriteLine("Paraboloid: {0}", testval2);
-        Console.WriteLine("Paraboloid: {0}", testval3);*/
+        /*double paraboloid(double x, double y) => Math.Pow(x - 3.5, 2) / 0.1225 + Math.Pow(y - 3.5, 2) / 0.245 - 100;
+
+        double paraboloid2(double x, double y) => (-Math.Pow(x - 3.5, 2) / 30 - Math.Pow(y - 3.5, 2) / 30 + 0.3)*100;
+
+        double late_factor = 1-(0.5*0.5);
+        double center = paraboloid(3, 4) * (1.0 - late_factor) + paraboloid2(3, 4) * late_factor;
+        double bottom   = paraboloid(0, 4) * (1.0 - late_factor) + paraboloid2(0, 4) * late_factor;
+        double left = paraboloid(4, 0) * (1.0 - late_factor) + paraboloid2(4, 0) * late_factor;
+        double corner = paraboloid(0, 0) * (1.0 - late_factor) + paraboloid2(0, 0) * late_factor;
+        double corner2 = paraboloid(7, 7) * (1.0 - late_factor) + paraboloid2(7, 7) * late_factor;
+        Console.WriteLine("center: {0}", center);
+        Console.WriteLine("left: {0}", left);
+        Console.WriteLine("bottom: {0}", bottom);
+        Console.WriteLine("corner: {0}", corner);
+        Console.WriteLine("corner2: {0}", corner2);*/
 
         Move[] moves = board.GetLegalMoves();
         Console.WriteLine("####################### Legal moves: {0}", moves.Length);
 
-        /*Console.WriteLine("New Move list ---");
-        foreach (Move move in moves)
-        {
-            Console.WriteLine("Move {0} {1}:{2}", board.GetPiece(move.StartSquare), move.StartSquare.Name, move.TargetSquare.Name);
-        }*/
-        /*Console.WriteLine("After ordering ---");
-        foreach (Move move in moves)
-        {
-            Console.WriteLine("Move {0} {1}:{2}", board.GetPiece(move.StartSquare), move.StartSquare.Name, move.TargetSquare.Name);
-        }*/
+        int maxSearchDepth = 4;
+        bestMove = new Move[maxSearchDepth+1];
+        bestMove[0] = moves[0];
 
-        System.Random rng = new();
-
-        switch (getNumPiecesLeft(board))
+        knownPositions = new Dictionary<ulong, int>();
+        cDictHits = 0;
+        for (int curDepth = 1; curDepth <= maxSearchDepth; curDepth++)
         {
-            case < 4:
-                searchDepth = 6;
+            cEvals = 0;
+            currentSearchDepth = curDepth;
+            int maxEval = NegaMax(board, curDepth, -10000000, 10000000);
+            if (maxEval == 10000)
+            {
+                Console.WriteLine("Found checkmate with searchDepth {0} after {1} ms", curDepth, timer.MillisecondsElapsedThisTurn);
                 break;
-            case < 7:
-                searchDepth = 6;
-                break;
-            case < 10:
-                searchDepth = 5;
-                break;
-            default:
-                searchDepth = 4;
-                break;
+            }
+            if ((double)gameTimer.MillisecondsElapsedThisTurn > (double)gameTimer.MillisecondsRemaining * 0.07)
+            {
+                Console.WriteLine("DictHits {0}", cDictHits);
+                Console.WriteLine("TURN TIME EXPIRED after {0} ms during searchDepth {1}", gameTimer.MillisecondsElapsedThisTurn, currentSearchDepth);
+                return bestMove[currentSearchDepth - 1];
+            }
+            Console.WriteLine("Search with depth {0} took {1} ms for {2} evals", curDepth, timer.MillisecondsElapsedThisTurn, cEvals);
         }
+        Console.WriteLine("DictHits {0}", cDictHits);
 
-        //searchDepth = 1;
-        bestMove = moves[0];
-        Console.WriteLine("Start Search with depth {0}", searchDepth);
-        //Search(board, searchDepth, -10000, 10000, board.IsWhiteToMove);
-        NegaMax(board, searchDepth, -10000, 10000);
-        Console.WriteLine("ms: {0} for {1} evals", timer.MillisecondsElapsedThisTurn, cEvals);
-        /*BitboardHelper.VisualizeBitboard(board.GetPieceBitboard(PieceType.Pawn, !board.IsWhiteToMove));
-        ulong pawns = board.GetPieceBitboard(PieceType.Pawn, board.IsWhiteToMove);
-        ulong res = pawns & (1 << 53);
-        bool res_bool = res == (1 << 53);
-        Console.WriteLine(Convert.ToString((long)pawns, 2));
-        Console.WriteLine(res_bool);
-        Console.WriteLine(Convert.ToString((long)res, 2));*/
-        return bestMove;
+        return bestMove[currentSearchDepth];
     }
 
     public void orderMoves(Board board, Move[] moves)
     {
         int[] moveValList = new int[moves.Length];
         int index = 0;
+        ulong pieceAttacks;
         foreach (Move move in moves)
         {
-            Piece movePieceType = board.GetPiece(move.StartSquare);
-            Piece capturePieceType = board.GetPiece(move.TargetSquare);
+            Piece movePiece = board.GetPiece(move.StartSquare);
+            Piece capturePiece = board.GetPiece(move.TargetSquare);
 
-            if (capturePieceType.PieceType != PieceType.None)
+            if (capturePiece.PieceType != PieceType.None)
             {
-                moveValList[index] += getPieceVal(capturePieceType) - getPieceVal(movePieceType);
+                moveValList[index] += getPieceVal(capturePiece) - getPieceVal(movePiece);
             }
 
-            /*board.MakeMove(move);
+            /*pieceAttacks = BitboardHelper.GetPieceAttacks(movePiece.PieceType, move.TargetSquare, board, board.IsWhiteToMove);
+            moveValList[index] += BitboardHelper.GetNumberOfSetBits(pieceAttacks) * 10;*/
+
+            board.MakeMove(move);
             if (board.IsInCheck())
             {
                 moveValList[index] += 10;
             }
-            board.UndoMove(move);*/
+            board.UndoMove(move);
 
             index++;
         }
@@ -111,18 +110,11 @@ public class MyBot : IChessBot
         if (debug)
         {
             indent = board.IsWhiteToMove ? "w" : "b";
-            indent += new string('-', searchDepth - depth + 1);
-        }
-        if (depth == 0)
-        {
-            cEvals++;
-            int evaluation = Evaluate_NegaMax(board);
-            //int evaluation = NegaMaxCapturesOnly(board, alpha, beta);
-            if (debug)
+            indent += new string('-', currentSearchDepth - depth + 1);
+            if (currentSearchDepth == depth)
             {
-                Console.WriteLine(indent + " Evaluation: {0}", evaluation);
+                indent += "-------------------------";
             }
-            return evaluation;
         }
 
         Move[] legal_moves = board.GetLegalMoves();
@@ -132,9 +124,29 @@ public class MyBot : IChessBot
         {
             if (board.IsInCheck())
             {
-                return -1000000;
+                if (debug)
+                {
+                    Console.WriteLine(indent + " Evaluation: {0} (checkmate)", -10000);
+                }
+                return -10000;
+            }
+            if (debug)
+            {
+                Console.WriteLine(indent + " Evaluation: {0} (stalemate)", 0);
             }
             return 0;
+        }
+
+        if (depth == 0)
+        {
+            cEvals++;
+            //int evaluation = Evaluate_NegaMax(board);
+            int evaluation = NegaMaxCapturesOnly(board, alpha, beta);
+            if (debug)
+            {
+                //Console.WriteLine(indent + " Evaluation: {0}", evaluation);
+            }
+            return evaluation;
         }
 
         int maxEval = alpha;
@@ -143,14 +155,21 @@ public class MyBot : IChessBot
             board.MakeMove(move);
             if (debug)
             {
-                Console.WriteLine(indent + "move {0}", getMoveAsString(move));
+                //Console.WriteLine(indent + "move {0}", getMoveAsString(move));
             }
+            //int extension = board.IsInCheck() ? 1 : 0;
             int eval = -NegaMax(board, depth - 1, -beta, -maxEval);
 
-            if (depth == searchDepth)
+            if ((double)gameTimer.MillisecondsElapsedThisTurn > (double)gameTimer.MillisecondsRemaining * 0.07)
             {
-                Console.WriteLine(indent + "move {0}: {1}", getMoveAsString(move), eval);
+                return beta;
             }
+
+            /*if (depth == searchDepth)
+            {
+                debug = false;
+                Console.WriteLine(indent + "move {0}: {1}", getMoveAsString(move), eval);
+            }*/
 
             if (board.GameRepetitionHistory.Contains(board.ZobristKey))
             {
@@ -162,15 +181,21 @@ public class MyBot : IChessBot
             if (eval > maxEval)
             {
                 maxEval = eval;
-                if (depth == searchDepth)
+                if (depth == currentSearchDepth)
                 {
+                    if (debug)
+                    {
+                        Console.WriteLine(indent + "new BEST move {0}: {1}", getMoveAsString(move), eval);
+                    }
 
-                    bestMove = move;
+                    bestMove[currentSearchDepth] = move;
                 }
                 if (maxEval >= beta)
                 {
                     //Console.WriteLine(indent + " beta cutoff, maxEval ({0}) >= beta ({1})", maxEval, beta);
-                    break;
+                    return beta;
+                    //break;
+
                 }
             }
         }
@@ -183,7 +208,7 @@ public class MyBot : IChessBot
         if (debug)
         {
             indent = board.IsWhiteToMove ? "w" : "b";
-            indent += " capturesOnly";
+            indent += " CO ";
         }
 
         cEvals++;
@@ -212,7 +237,7 @@ public class MyBot : IChessBot
             board.MakeMove(move);
             if (debug)
             {
-                Console.WriteLine(indent + "move {0}", getMoveAsString(move));
+                //Console.WriteLine(indent + "move {0}", getMoveAsString(move));
             }
             int eval = -NegaMaxCapturesOnly(board, -beta, -alpha);
             board.UndoMove(move);
@@ -246,32 +271,14 @@ public class MyBot : IChessBot
         return movingPieceAsString + "x" + targetSquare;
     }
 
-    /*public int Evaluate(Board board)
-    {
-        PieceList[] piecesLists = board.GetAllPieceLists();
-        int material = 0;
-        int sum_white = 0, sum_black = 0;
-        for (int i = 0; i < piecesLists.Length / 2; i++)
-        {
-            sum_white += piecesLists[i].Count * pieceVals[i];
-            sum_black -= piecesLists[i+6].Count * pieceVals[i+6];
-            //material += piecesLists[i].Count * pieceVals[i];
-        }
-        material = sum_white - sum_black;
-        if (sum_white > sum_black)
-        {
-            material += KingToEdgeEvalutation(board);
-        }
-        else if (sum_white < sum_black)
-        {
-            material -= KingToEdgeEvalutation(board);
-        }
-        //material += board.IsWhiteToMove ? endgame_advantage(board) : -endgame_advantage(board);
-        return material;
-    }*/
-
     public int Evaluate_NegaMax(Board board)
     {
+        if (knownPositions.ContainsKey(board.ZobristKey))
+        {
+            cDictHits++;
+            return knownPositions[board.ZobristKey];
+        }
+
         PieceList[] piecesLists = board.GetAllPieceLists();
         int eval = 0;
         int material_maxplayer = 0, material_minplayer = 0;
@@ -283,7 +290,14 @@ public class MyBot : IChessBot
         }
 
         eval += KnightPositionEval(board);
+        eval += BishopPositionEval(board);
         //Console.WriteLine("after knightEval: {0}", eval);
+
+        eval += EvaluateKingsPosition(board, material_maxplayer + material_minplayer);
+
+        int king_safety = EvaluateKingsSafety(board, true) - EvaluateKingsSafety(board, false);
+        //Console.WriteLine("king_safety: {0}", king_safety);
+        eval += king_safety;
 
         // Black-White differenciation until here
 
@@ -302,38 +316,15 @@ public class MyBot : IChessBot
         }
         eval += material_maxplayer - material_minplayer;
 
-        //Console.WriteLine("after materialEval: {0}", eval);
-
-        //eval += EvaluateKingsideSafety2(board);
-        //material += board.IsWhiteToMove ? endgame_advantage(board) : -endgame_advantage(board);
-
-        int numPiecesLeft = getNumPiecesLeft(board);
-        if (numPiecesLeft < 20)
-        {
-            //eval += (int)((20.0 - numPiecesLeft) / 20.0) * KingControlEvaluation(board);
-            //eval += (int)((20.0 - numPiecesLeft) / 20.0) * KingToEdgeEvalutation(board);
-        }
-        /*Console.WriteLine("material_minplayer: {0}", material_minplayer);
-        Console.WriteLine("material_maxplayer: {0}", material_maxplayer);
-        int evalK = 0;
-        if (material_maxplayer < 900 && (material_maxplayer < material_minplayer))
-        {
-            evalK = KingToEdgeEvalutation(board);
-            Console.WriteLine("KingEval: {0}", evalK);
-            //eval += KingToEdgeEvalutation(board);
-            eval -= evalK;
-        }
-        Console.WriteLine("after kingEval: {0}", eval);*/
         if (material_maxplayer > material_minplayer && material_minplayer < 900)
         {
-            eval += KingToEdgeEvalutation(board);
+            eval += EvaluateKingsDistance(board);
         } else if (material_minplayer > material_maxplayer && material_maxplayer < 900)
         {
-            eval -= KingToEdgeEvalutation(board);
+            eval -= EvaluateKingsDistance(board);
         }
-        //Console.WriteLine("after kingEval: {0}", eval);
 
-
+        knownPositions[board.ZobristKey] = eval;
         return eval;
     }
 
@@ -347,39 +338,12 @@ public class MyBot : IChessBot
         Console.WriteLine("Move: {0}, Eval: {1}", getMoveAsString(move), eval);
     }
 
-    public int KingToEdgeEvalutation(Board board)
+    public int EvaluateKingsDistance(Board board)
     {
-        /*Square ks = board.GetKingSquare(!board.IsWhiteToMove);
-        int[] edge_bonus = { 10, 5, 2, 0, 0, 2, 5, 10 };
-        int bonus = edge_bonus[ks.Rank] + edge_bonus[ks.File];*/
         int manhattanDist = Math.Abs(board.GetKingSquare(true).Rank - board.GetKingSquare(false).Rank);
         manhattanDist += Math.Abs(board.GetKingSquare(true).File - board.GetKingSquare(false).File);
-        //return (14 - manhattanDist);
         int eval = (14 - manhattanDist) * 2;
-        //Console.WriteLine("KingToEdgeEvalutation {0}", eval);
         return (14 - manhattanDist)*2;
-    }
-
-    public int KingControlEvaluation(Board board)
-    {
-        int attackedSquaresAroundKing = 0;
-        Square ks = board.GetKingSquare(!board.IsWhiteToMove);
-        bool currentTurn = board.IsWhiteToMove;
-        board.TrySkipTurn();
-        if (currentTurn == board.IsWhiteToMove)
-        {
-            return 0;
-        }
-        for (int i = Math.Max(ks.Rank - 1, 0); i < 8; i++)
-        {
-            for (int j = Math.Max(ks.File - 1, 0); i < 8; i++)
-            {
-                attackedSquaresAroundKing += board.SquareIsAttackedByOpponent(new Square(j, i)) ? 1 : 0;
-            }
-        }
-        board.UndoSkipTurn();
-        Console.WriteLine("KingControlEvaluationMove Bonus {0}", attackedSquaresAroundKing * 3);
-        return attackedSquaresAroundKing * 3;
     }
 
     public int getNumPiecesLeft(Board board)
@@ -392,39 +356,72 @@ public class MyBot : IChessBot
         return numPieces;
     }
 
-    public int EvaluateKingsideSafety2(Board board)
+    private int EvaluateKingsSafety(Board board, bool color)
     {
-        int eval = 0;
-        for (int i = 13; i < 16; i++)
+        int cntAdjacentPawns = 0;
+        ulong kAdjacentSquares = BitboardHelper.GetKingAttacks(board.GetKingSquare(color));
+
+        int idx = 0;
+        while (true)
         {
-            if (board.GetPiece(new Square(i)).PieceType != PieceType.Pawn)
+            idx = BitboardHelper.ClearAndGetIndexOfLSB(ref kAdjacentSquares);
+            if (idx > 63) 
+                break;
+            if (board.GetPiece(new Square(idx)).PieceType == PieceType.Pawn)
             {
-                eval -= 20;
+                cntAdjacentPawns++;
             }
         }
-        for (int i = 53; i < 56; i++)
-        {
-            if (board.GetPiece(new Square(i)).PieceType != PieceType.Pawn)
-            {
-                eval += 20;
-            }
-        }
-        return eval;
+        return cntAdjacentPawns * 5;
+    }
+
+    public int EvaluateKingsPosition(Board board, int total_material)
+    {
+        double eval = 0;
+        double lategameFactor = 1.0 - Math.Pow((float)total_material / 7800.0, 2);
+        //Console.WriteLine("lategameFactor: {0}", lategameFactor);
+
+        double paraboloid_corner_bonus(double x, double y) => Math.Pow(x - 3.5, 2) / 0.245 + Math.Pow(y - 3.5, 2) / 0.1225 - 100;
+
+        eval += paraboloid_center_bonus(board.GetKingSquare(true).File, board.GetKingSquare(true).Rank) * lategameFactor +
+            paraboloid_corner_bonus(board.GetKingSquare(true).File, board.GetKingSquare(true).Rank) * 0.5 * (1.0-lategameFactor);
+
+        eval -= paraboloid_center_bonus(board.GetKingSquare(false).File, board.GetKingSquare(false).Rank) * lategameFactor +
+            paraboloid_corner_bonus(board.GetKingSquare(false).File, board.GetKingSquare(false).Rank) * 0.5 * (1.0-lategameFactor);
+
+        //eval += paraboloid(board.GetKingSquare(true).File, board.GetKingSquare(true).Rank);
+        //Console.WriteLine("EvaluateKingsPosition W: {0}", eval);
+        //eval -= paraboloid(board.GetKingSquare(false).File, board.GetKingSquare(false).Rank);
+        //Console.WriteLine("EvaluateKingsPosition: {0}", eval);
+        return Convert.ToInt32(eval);
     }
 
     public int KnightPositionEval(Board board)
     {
         double eval = 0;
-        double paraboloid(double x, double y) => -Math.Pow(x-3.5, 2)/30 - Math.Pow(y-3.5, 2)/30 + 0.3;
         foreach (Piece knight in board.GetPieceList(PieceType.Knight, true))
         {
-            eval += paraboloid(knight.Square.File, knight.Square.Rank);
+            eval += paraboloid_center_bonus(knight.Square.File, knight.Square.Rank);
         }
         foreach (Piece knight in board.GetPieceList(PieceType.Knight, false))
         {
-            eval -= paraboloid(knight.Square.File, knight.Square.Rank);
+            eval -= paraboloid_center_bonus(knight.Square.File, knight.Square.Rank);
         }
-        //Console.WriteLine("knightEval: {0}", eval);
-        return Convert.ToInt32(eval*100);
+        return Convert.ToInt32(eval);
+    }
+
+    public int BishopPositionEval(Board board)
+    {
+        int eval = 0;
+        foreach (Piece bishop in board.GetPieceList(PieceType.Bishop, true))
+        {
+            eval += 2 * BitboardHelper.GetNumberOfSetBits(BitboardHelper.GetSliderAttacks(PieceType.Bishop, bishop.Square, board.WhitePiecesBitboard));
+        }
+        foreach (Piece bishop in board.GetPieceList(PieceType.Bishop, false))
+        {
+            eval -= 2 * BitboardHelper.GetNumberOfSetBits(BitboardHelper.GetSliderAttacks(PieceType.Bishop, bishop.Square, board.BlackPiecesBitboard));
+        }
+        //Console.WriteLine("BishopEval: {0}", eval);
+        return eval;
     }
 }

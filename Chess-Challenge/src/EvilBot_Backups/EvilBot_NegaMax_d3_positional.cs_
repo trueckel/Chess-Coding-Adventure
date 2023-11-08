@@ -7,28 +7,22 @@ namespace ChessChallenge.Example
 {
     public class EvilBot : IChessBot
     {
-        bool debug;
         private int currentSearchDepth;
-        private Move[] bestMove;
-        int cEvals;
+        private Move bestMove;
         private int[] pieceVals = { 100, 290, 310, 500, 900, 0 };
         private Timer gameTimer;
-        private double paraboloid_center_bonus(double x, double y) => (-Math.Pow(x - 3.5, 2) / 30 - Math.Pow(y - 3.5, 2) / 30 + 0.3) * 100;
 
         public Move Think(Board board, Timer timer)
         {
             gameTimer = timer;
-            debug = false;
 
             Move[] moves = board.GetLegalMoves();
 
-            int maxSearchDepth = 4;
-            bestMove = new Move[maxSearchDepth + 1];
-            bestMove[0] = moves[0];
+            int searchDepth = 3;
+            bestMove = moves[0];
 
-            for (int curDepth = 1; curDepth <= maxSearchDepth; curDepth++)
+            for (int curDepth = 1; curDepth <= searchDepth; curDepth++)
             {
-                cEvals = 0;
                 currentSearchDepth = curDepth;
                 int maxEval = NegaMax(board, curDepth, -10000000, 10000000);
                 if (maxEval == 10000)
@@ -37,11 +31,10 @@ namespace ChessChallenge.Example
                 }
                 if ((double)gameTimer.MillisecondsElapsedThisTurn > (double)gameTimer.MillisecondsRemaining * 0.07)
                 {
-                    return bestMove[currentSearchDepth - 1];
+                    break;
                 }
             }
-
-            return bestMove[currentSearchDepth];
+            return bestMove;
         }
 
         public void orderMoves(Board board, Move[] moves)
@@ -50,12 +43,12 @@ namespace ChessChallenge.Example
             int index = 0;
             foreach (Move move in moves)
             {
-                Piece movePiece = board.GetPiece(move.StartSquare);
-                Piece capturePiece = board.GetPiece(move.TargetSquare);
+                Piece movePieceType = board.GetPiece(move.StartSquare);
+                Piece capturePieceType = board.GetPiece(move.TargetSquare);
 
-                if (capturePiece.PieceType != PieceType.None)
+                if (capturePieceType.PieceType != PieceType.None)
                 {
-                    moveValList[index] += getPieceVal(capturePiece) - getPieceVal(movePiece);
+                    moveValList[index] += getPieceVal(capturePieceType) - getPieceVal(movePieceType);
                 }
 
                 index++;
@@ -81,7 +74,6 @@ namespace ChessChallenge.Example
 
             if (depth == 0)
             {
-                cEvals++;
                 int evaluation = NegaMaxCapturesOnly(board, alpha, beta);
                 return evaluation;
             }
@@ -109,7 +101,7 @@ namespace ChessChallenge.Example
                     maxEval = eval;
                     if (depth == currentSearchDepth)
                     {
-                        bestMove[currentSearchDepth] = move;
+                        bestMove = move;
                     }
                     if (maxEval >= beta)
                     {
@@ -122,7 +114,6 @@ namespace ChessChallenge.Example
 
         public int NegaMaxCapturesOnly(Board board, int alpha, int beta)
         {
-            cEvals++;
             int evaluation = Evaluate_NegaMax(board);
             if (evaluation >= beta)
             {
@@ -148,25 +139,6 @@ namespace ChessChallenge.Example
             return alpha;
         }
 
-        public string getMoveAsString(Move move)
-        {
-            PieceType movingPiece = move.MovePieceType;
-            char movingPieceAsString = movingPiece.ToString() == "Knight" ? 'N' : movingPiece.ToString()[0];
-            PieceType capturedPiece = move.CapturePieceType;
-            string startSquare = move.StartSquare.Name;
-            string targetSquare = move.TargetSquare.Name;
-
-            if (capturedPiece == PieceType.None && movingPiece == PieceType.Pawn)
-            {
-                return targetSquare;
-            }
-            else if (capturedPiece == PieceType.None)
-            {
-                return movingPieceAsString + startSquare + targetSquare;
-            }
-            return movingPieceAsString + "x" + targetSquare;
-        }
-
         public int Evaluate_NegaMax(Board board)
         {
             PieceList[] piecesLists = board.GetAllPieceLists();
@@ -179,11 +151,6 @@ namespace ChessChallenge.Example
             }
 
             eval += KnightPositionEval(board);
-
-            eval += EvaluateKingsPosition(board, material_maxplayer + material_minplayer);
-
-            int king_safety = EvaluateKingsSafety(board, true) - EvaluateKingsSafety(board, false);
-            eval += king_safety;
 
             // Black-White differenciation until here
 
@@ -204,11 +171,11 @@ namespace ChessChallenge.Example
 
             if (material_maxplayer > material_minplayer && material_minplayer < 900)
             {
-                eval += EvaluateKingsDistance(board);
+                eval += KingToEdgeEvalutation(board);
             }
             else if (material_minplayer > material_maxplayer && material_maxplayer < 900)
             {
-                eval -= EvaluateKingsDistance(board);
+                eval -= KingToEdgeEvalutation(board);
             }
 
             return eval;
@@ -219,12 +186,7 @@ namespace ChessChallenge.Example
             return pieceVals[((int)piece.PieceType) - 1];
         }
 
-        public void printMoveEvals(Move move, int eval)
-        {
-            Console.WriteLine("Move: {0}, Eval: {1}", getMoveAsString(move), eval);
-        }
-
-        public int EvaluateKingsDistance(Board board)
+        public int KingToEdgeEvalutation(Board board)
         {
             int manhattanDist = Math.Abs(board.GetKingSquare(true).Rank - board.GetKingSquare(false).Rank);
             manhattanDist += Math.Abs(board.GetKingSquare(true).File - board.GetKingSquare(false).File);
@@ -232,63 +194,19 @@ namespace ChessChallenge.Example
             return (14 - manhattanDist) * 2;
         }
 
-        public int getNumPiecesLeft(Board board)
-        {
-            int numPieces = 0;
-            foreach (PieceList list in board.GetAllPieceLists())
-            {
-                numPieces += list.Count();
-            }
-            return numPieces;
-        }
-
-        private int EvaluateKingsSafety(Board board, bool color)
-        {
-            int cntAdjacentPawns = 0;
-            ulong kAdjacentSquares = BitboardHelper.GetKingAttacks(board.GetKingSquare(color));
-
-            int idx = 0;
-            while (true)
-            {
-                idx = BitboardHelper.ClearAndGetIndexOfLSB(ref kAdjacentSquares);
-                if (idx > 63)
-                    break;
-                if (board.GetPiece(new Square(idx)).PieceType == PieceType.Pawn)
-                {
-                    cntAdjacentPawns++;
-                }
-            }
-            return cntAdjacentPawns * 5;
-        }
-
-        public int EvaluateKingsPosition(Board board, int total_material)
-        {
-            double eval = 0;
-            double lategameFactor = 1.0 - Math.Pow((float)total_material / 7800.0, 2);
-
-            double paraboloid_corner_bonus(double x, double y) => Math.Pow(x - 3.5, 2) / 0.245 + Math.Pow(y - 3.5, 2) / 0.1225 - 100;
-
-            eval += paraboloid_center_bonus(board.GetKingSquare(true).File, board.GetKingSquare(true).Rank) * lategameFactor +
-                paraboloid_corner_bonus(board.GetKingSquare(true).File, board.GetKingSquare(true).Rank) * 0.5 * (1.0 - lategameFactor);
-
-            eval -= paraboloid_center_bonus(board.GetKingSquare(false).File, board.GetKingSquare(false).Rank) * lategameFactor +
-                paraboloid_corner_bonus(board.GetKingSquare(false).File, board.GetKingSquare(false).Rank) * 0.5 * (1.0 - lategameFactor);
-
-            return Convert.ToInt32(eval);
-        }
-
         public int KnightPositionEval(Board board)
         {
             double eval = 0;
+            double paraboloid(double x, double y) => -Math.Pow(x - 3.5, 2) / 30 - Math.Pow(y - 3.5, 2) / 30 + 0.3;
             foreach (Piece knight in board.GetPieceList(PieceType.Knight, true))
             {
-                eval += paraboloid_center_bonus(knight.Square.File, knight.Square.Rank);
+                eval += paraboloid(knight.Square.File, knight.Square.Rank);
             }
             foreach (Piece knight in board.GetPieceList(PieceType.Knight, false))
             {
-                eval -= paraboloid_center_bonus(knight.Square.File, knight.Square.Rank);
+                eval -= paraboloid(knight.Square.File, knight.Square.Rank);
             }
-            return Convert.ToInt32(eval);
+            return Convert.ToInt32(eval * 100);
         }
     }
 }
